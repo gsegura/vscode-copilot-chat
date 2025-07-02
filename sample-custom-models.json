@@ -1,0 +1,68 @@
+{
+	"providers": [
+		{
+			"name": "Gemini",
+			"apiKeyEnv": "GEMINI_API_KEY",
+			"models": [
+				{
+					"id": "gemini-1.5-pro",
+					"displayName": "Gemini 1.5 Pro"
+				}
+			]
+		},
+		{
+			"name": "Ollama",
+			"models": [
+				{
+					"id": "llama3",
+					"displayName": "Llama 3 (local)"
+				}
+			]
+		},
+		{
+			"name": "OpenAI",
+			"apiKeyEnv": "OPENAI_API_KEY",
+			"models": [
+				{
+					"id": "gpt-4o-mini",
+					"displayName": "GPT-4o Mini"
+				},
+				{
+					"id": "gpt-4o",
+					"displayName": "GPT-4o"
+				}
+			]
+		},
+		{
+			"name": "Anthropic",
+			"apiKeyEnv": "ANTHROPIC_API_KEY",
+			"models": [
+				{
+					"id": "claude-3-sonnet-20240229",
+					"displayName": "Claude 3 Sonnet"
+				}
+			]
+		},
+		{
+			"name": "Azure",
+			"models": [
+				{
+					"id": "my-gpt4-deployment",
+					"displayName": "Azure GPT-4",
+					"deploymentUrl": "https://my-azure-instance.openai.azure.com/",
+					"apiKeyEnv": "AZURE_OPENAI_KEY"
+				}
+			]
+		},
+		{
+			"name": "OpenRouter",
+			"apiKeyEnv": "OPENROUTER_API_KEY",
+			"models": [
+				{
+					"id": "gryphe/mythomax-13b",
+					"displayName": "MythoMax 13B"
+				}
+			]
+		}
+	]
+}

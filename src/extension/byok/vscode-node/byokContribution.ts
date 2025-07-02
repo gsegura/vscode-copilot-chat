@@ -2,6 +2,8 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import * as fs from 'fs';
+import * as path from 'path';
 import { commands, Disposable as VSCodeDisposable, window } from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
@@ -31,6 +33,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	private _registeredModelDisposables = new Map<string, VSCodeDisposable>();
 	private _byokUIService!: BYOKUIService; // Set in authChange, so ok to !
 	private readonly _byokStorageService: IBYOKStorageService;
+	private readonly _extensionContext: IVSCodeExtensionContext;
 
 	constructor(
 		@IFetcherService private readonly _fetcherService: IFetcherService,
@@ -43,6 +46,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		@ITelemetryService private readonly _telemetryService: ITelemetryService
 	) {
 		super();
+		this._extensionContext = extensionContext;
 		this._byokStorageService = new BYOKStorageService(extensionContext);
 		this._authChange(authService, instantiationService);
 
@@ -81,6 +85,11 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 			await this.fetchKnownModelList(this._fetcherService);
 		}
 		this._byokUIService = new BYOKUIService(this._byokStorageService, this._modelRegistries);
+
+		// Import any user-defined models before we attempt to restore models so that
+		// they are picked up in the initial registration pass.
+		await this.importModelsFromConfig();
+
 		this.restoreModels(true);
 	}
 
@@ -108,7 +117,6 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 			this._logService.logger.error('Large telemetry test failed', error);
 		}
 	}
-
 
 	private async fetchKnownModelList(fetcherService: IFetcherService) {
 		const data = await (await fetcherService.fetch('https://main.vscode-cdn.net/extensions/copilotChat.json', { method: "GET" })).json();
@@ -178,8 +186,6 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 			}
 		}
 	}
-
-
 
 	private async registerModel(
 		modelId: string,
@@ -318,6 +324,92 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 					// Skip registering this model if it fails
 				}
 			}
+		}
+	}
+
+	private async importModelsFromConfig(): Promise<void> {
+		try {
+			const configPath = path.join(this._extensionContext.extensionPath, 'custom-models.json');
+			if (!fs.existsSync(configPath)) {
+				return; // No configuration file – nothing to do.
+			}
+
+			const raw = await fs.promises.readFile(configPath, 'utf-8');
+			const config = JSON.parse(raw);
+
+			if (!config.providers || !Array.isArray(config.providers)) {
+				this._logService.logger.warn('BYOK: custom-models.json is missing a "providers" array.');
+				return;
+			}
+
+			for (const provider of config.providers) {
+				if (!provider?.name) {
+					continue;
+				}
+
+				// Find registry for this provider name (case-sensitive match to class names)
+				const registry = this._modelRegistries.find(r => r.name === provider.name);
+				if (!registry) {
+					this._logService.logger.warn(`BYOK: Provider '${provider.name}' from custom-models.json is not available or not enabled.`);
+					continue;
+				}
+
+				// Provider-level API key
+				if (provider.apiKeyEnv && process.env[provider.apiKeyEnv]) {
+					await this._byokStorageService.storeAPIKey(provider.name, process.env[provider.apiKeyEnv]!, registry.authType);
+				}
+
+				// Iterate declared models
+				if (!provider.models || !Array.isArray(provider.models)) {
+					continue;
+				}
+
+				for (const model of provider.models) {
+					if (!model?.id) {
+						continue;
+					}
+
+					// Per-model API key overrides provider key
+					let modelApiKey = '';
+					if (model.apiKeyEnv && process.env[model.apiKeyEnv]) {
+						modelApiKey = process.env[model.apiKeyEnv]!;
+					} else if (provider.apiKeyEnv && process.env[provider.apiKeyEnv]) {
+						modelApiKey = process.env[provider.apiKeyEnv]!;
+					}
+
+					// Persist the API key in storage according to the provider auth strategy
+					if (modelApiKey) {
+						await this._byokStorageService.storeAPIKey(
+							provider.name,
+							modelApiKey,
+							registry.authType,
+							registry.authType === BYOKAuthType.PerModelDeployment ? model.id : undefined
+						);
+					}
+
+					await this._byokStorageService.saveModelConfig(
+						model.id,
+						provider.name,
+						{
+							apiKey: modelApiKey,
+							isCustomModel: true,
+							deploymentUrl: model.deploymentUrl,
+							modelCapabilities: model.displayName ? {
+								name: model.displayName,
+								maxInputTokens: model.maxInputTokens ?? 100000,
+								maxOutputTokens: model.maxOutputTokens ?? 8192,
+								toolCalling: model.toolCalling ?? false,
+								vision: model.vision ?? false,
+							} : undefined
+						},
+						registry.authType
+					);
+				}
+			}
+
+			this._logService.logger.info('BYOK: Successfully imported custom models from custom-models.json.');
+		} catch (error) {
+			this._logService.logger.error('BYOK: Error processing custom-models.json:', error);
 		}
 	}
 }
